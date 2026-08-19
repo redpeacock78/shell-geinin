@@ -1,0 +1,8 @@
+{
+  "name": "shell-geinin",
+  "version": "0.1.0",
+  "description": "Cross-platform shell-gei for repository investigation, file search, Git inspection, structured data reduction, and safe command composition.",
+  "license": "MIT",
+  "keywords": ["shell", "cli", "cross-platform", "terminal", "agent-skill"],
+  "skills": "./skills/"
+}

@@ -1,0 +1,12 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+
+# Local secrets and Claude settings
+.env
+.env.*
+!.env.example
+.claude/settings.local.json
