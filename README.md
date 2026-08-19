@@ -119,7 +119,7 @@ rg -n 'status=(ERROR|WARN) service=(api|worker)' events-200k.log
 rg -n -m 50 'status=(ERROR|WARN) service=(api|worker)' events-200k.log
 
 jq -c '.' records-100k.ndjson
-jq -c 'limit(50; select(.status == "error" and .service == "api") | {id,status,service})' records-100k.ndjson
+jq -c -n 'limit(50; inputs | select(.status == "error" and .service == "api") | {id,status,service})' records-100k.ndjson
 
 git -C history-repo log --format=fuller --stat
 git -C history-repo log -50 --format='%h %s' --no-decorate
@@ -128,12 +128,44 @@ git -C history-repo log -50 --format='%h %s' --no-decorate
 | Scenario | Command tokens | Output tokens | Total tokens | Reduction |
 | --- | ---: | ---: | ---: | ---: |
 | 200k-line log, all matching rows → first 50 | 21 → 25 | 1,846,421 → 2,257 | 1,846,442 → 2,282 | 99.9% |
-| 100k NDJSON, all records → matching `error/api` projections, first 50 | 10 → 36 | 4,599,001 → 16,453 | 4,599,011 → 16,489 | 99.6% |
+| 100k NDJSON, all records → matching `error/api` projections, first 50 | 10 → 40 | 4,599,001 → 689 | 4,599,011 → 729 | 99.98% |
 | 1,000 commits, full detail → latest 50 one-line summaries | 14 → 21 | 93,562 → 667 | 93,576 → 688 | 99.3% |
 
-The `cl100k_base` cross-check rounded to the same reductions: 99.9%, 99.6%, and 99.3%.
+The `cl100k_base` cross-check rounded to one decimal place as 99.9%, 100.0%, and 99.3%.
 The result is therefore primarily driven by output cardinality and field width, not by a tokenizer-specific quirk.
 These percentages are measurements on controlled fixtures, not a promise of the same saving for every repository or query.
+
+### Inline Python versus shell-geinin
+
+Large and structured inputs often tempt an agent to write a disposable `python3 -c` program.
+This comparison keeps the task and stdout identical, then measures only the command text and that shared output.
+All three pairs produced byte-for-byte identical stdout.
+
+The `o200k_base` results are shown as `command tokens + output tokens = total tokens`:
+
+| Scenario | Inline Python | shell-geinin form | Total reduction |
+| --- | ---: | ---: | ---: |
+| 200k-line log, bounded multi-condition search | 73 + 2,257 = 2,330 | 25 + 2,257 = 2,282 | 2.1% |
+| 100k NDJSON, filter + projection + first 50 | 89 + 689 = 778 | 40 + 689 = 729 | 6.3% |
+| 200k-line log, grouped counts | 89 + 10 = 99 | 62 + 10 = 72 | 27.3% |
+
+Representative command pairs:
+
+```sh
+python3 -c 'import re,itertools; p=re.compile(r"status=(ERROR|WARN) service=(api|worker)"); [print(f"{n}:{line}",end="") for n,line in itertools.islice(((n,line) for n,line in enumerate(open("events-200k.log"),1) if p.search(line)),50)]'
+rg -n -m 50 'status=(ERROR|WARN) service=(api|worker)' events-200k.log
+
+python3 -c 'import json,itertools; records=(json.loads(line) for line in open("records-100k.ndjson")); selected=(r for r in records if r["status"]=="error" and r["service"]=="api"); [print(json.dumps({key:r[key] for key in ("id","status","service")},separators=(",",":"))) for r in itertools.islice(selected,50)]'
+jq -c -n 'limit(50; inputs | select(.status == "error" and .service == "api") | {id,status,service})' records-100k.ndjson
+
+python3 -c 'from collections import Counter; counts=Counter(line.split()[2].split("=")[1] for line in open("events-200k.log") if line.split()[1].split("=")[1] in ("ERROR","WARN") and line.split()[2].split("=")[1] in ("api","worker")); print("\n".join(f"{key} {counts[key]}" for key in sorted(counts)))'
+awk '$2 ~ /^status=(ERROR|WARN)$/ && $3 ~ /^service=(api|worker)$/ { sub(/^service=/, "", $3); count[$3]++ } END { for (service in count) print service, count[service] }' events-200k.log | sort
+```
+
+The comparison does not show that Python is always the wrong choice.
+When both forms return thousands of rows, the shared output dominates and syntax savings are small.
+When the result is a compact aggregate, command text accounts for a larger share and the shell form saves more.
+If the shell composition becomes harder to read or maintain, a tested script is the documented escalation path.
 
 ## 📁 Repository layout
 

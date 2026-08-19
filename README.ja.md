@@ -118,7 +118,7 @@ rg -n 'status=(ERROR|WARN) service=(api|worker)' events-200k.log
 rg -n -m 50 'status=(ERROR|WARN) service=(api|worker)' events-200k.log
 
 jq -c '.' records-100k.ndjson
-jq -c 'limit(50; select(.status == "error" and .service == "api") | {id,status,service})' records-100k.ndjson
+jq -c -n 'limit(50; inputs | select(.status == "error" and .service == "api") | {id,status,service})' records-100k.ndjson
 
 git -C history-repo log --format=fuller --stat
 git -C history-repo log -50 --format='%h %s' --no-decorate
@@ -127,12 +127,44 @@ git -C history-repo log -50 --format='%h %s' --no-decorate
 | パターン | コマンドトークン | 出力トークン | 合計トークン | 削減率 |
 | --- | ---: | ---: | ---: | ---: |
 | 20万行ログ、条件一致の全行 → 先頭50行 | 21 → 25 | 1,846,421 → 2,257 | 1,846,442 → 2,282 | 99.9% |
-| 10万件NDJSON、全レコード → `error/api` の必要項目・先頭50件 | 10 → 36 | 4,599,001 → 16,453 | 4,599,011 → 16,489 | 99.6% |
+| 10万件NDJSON、全レコード → `error/api` の必要項目・先頭50件 | 10 → 40 | 4,599,001 → 689 | 4,599,011 → 729 | 99.98% |
 | 1,000件のコミット、詳細全件 → 直近50件の1行要約 | 14 → 21 | 93,562 → 667 | 93,576 → 688 | 99.3% |
 
-`cl100k_base` でのクロスチェックも、削減率を小数点以下1桁に丸めると99.9%、99.6%、99.3%で一致しました。
+`cl100k_base` でのクロスチェックは、削減率を小数点以下1桁に丸めると99.9%、100.0%、99.3%でした。
 したがって、主な要因はトークナイザの癖ではなく、出力件数と1件あたりの項目幅です。
 これらは条件を固定した測定値であり、すべてのリポジトリや検索で同じ削減率になることを保証するものではありません。
+
+### インラインPythonとshell-geininの比較
+
+大きな構造化データを扱うとき、エージェントは使い捨ての `python3 -c` を書きがちです。
+ここでは処理内容と標準出力を揃え、コマンド文字列と共通の出力だけを測定しました。
+3組とも標準出力がバイト単位で一致しています。
+
+`o200k_base` の値は「コマンドトークン + 出力トークン = 合計トークン」で示します。
+
+| パターン | インラインPython | shell-geinin型 | 合計削減率 |
+| --- | ---: | ---: | ---: |
+| 20万行ログ、複数条件検索と先頭50件 | 73 + 2,257 = 2,330 | 25 + 2,257 = 2,282 | 2.1% |
+| 10万件NDJSON、条件選択、項目射影、先頭50件 | 89 + 689 = 778 | 40 + 689 = 729 | 6.3% |
+| 20万行ログ、サービス別集計 | 89 + 10 = 99 | 62 + 10 = 72 | 27.3% |
+
+代表的なコマンドの組み合わせは次のとおりです。
+
+```sh
+python3 -c 'import re,itertools; p=re.compile(r"status=(ERROR|WARN) service=(api|worker)"); [print(f"{n}:{line}",end="") for n,line in itertools.islice(((n,line) for n,line in enumerate(open("events-200k.log"),1) if p.search(line)),50)]'
+rg -n -m 50 'status=(ERROR|WARN) service=(api|worker)' events-200k.log
+
+python3 -c 'import json,itertools; records=(json.loads(line) for line in open("records-100k.ndjson")); selected=(r for r in records if r["status"]=="error" and r["service"]=="api"); [print(json.dumps({key:r[key] for key in ("id","status","service")},separators=(",",":"))) for r in itertools.islice(selected,50)]'
+jq -c -n 'limit(50; inputs | select(.status == "error" and .service == "api") | {id,status,service})' records-100k.ndjson
+
+python3 -c 'from collections import Counter; counts=Counter(line.split()[2].split("=")[1] for line in open("events-200k.log") if line.split()[1].split("=")[1] in ("ERROR","WARN") and line.split()[2].split("=")[1] in ("api","worker")); print("\n".join(f"{key} {counts[key]}" for key in sorted(counts)))'
+awk '$2 ~ /^status=(ERROR|WARN)$/ && $3 ~ /^service=(api|worker)$/ { sub(/^service=/, "", $3); count[$3]++ } END { for (service in count) print service, count[service] }' events-200k.log | sort
+```
+
+この比較は、Pythonが常に不適切だと示すものではありません。
+両方が数千行を返す場合は共通の出力が大半を占めるため、構文の差による削減は小さくなります。
+結果が短い集計ではコマンド文字列の割合が増えるため、shell-geinin型の削減率が大きくなります。
+シェルの組み合わせが読みにくく保守しにくくなる場合は、テスト可能なスクリプトへ昇格する方針を取ります。
 
 ## 📁 リポジトリ構成
 
