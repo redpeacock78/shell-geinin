@@ -1,48 +1,100 @@
 # shell-geinin
 
-Cross-platform shell-gei as an Agent Skill for Claude Code and Codex CLI.
+An agent skill for doing shell work that survives contact with real repositories.
 
-It teaches an agent to inspect the active shell, preserve its native pipeline data model, reduce data at the producer, and choose the shortest clear and safe command composition.
+`shell-geinin` helps Claude Code and Codex CLI choose commands that fit the
+active shell, keep data in the shell's native pipeline model, reduce output at
+the producer, and stop when a maintained tool is the better abstraction.
 
-## Contents
+## Install
 
-- `skills/shell-geinin/SKILL.md` — the skill entrypoint
-- `skills/shell-geinin/references/` — platform notes, technique reference, research notes, and maintainer evaluations
-- `.claude-plugin/plugin.json` — Claude Code plugin manifest
-- `.codex-plugin/plugin.json` — Codex plugin manifest
-
-The main `SKILL.md` stays under 500 lines. Detailed material is loaded from `references/` only when needed.
-
-## Use with Claude Code
-
-Test the plugin directly from this checkout:
+The quickest path is the Vercel Labs Skills CLI:
 
 ```sh
-claude --plugin-dir .
+npx skills add redpeacock78/shell-geinin
 ```
 
-Invoke it as `/shell-geinin:shell-geinin`.
-
-For a project-scoped standalone skill, copy `skills/shell-geinin/` to `.claude/skills/shell-geinin/` in that project.
-
-## Use with Codex CLI
-
-For a repository-scoped standalone skill, copy `skills/shell-geinin/` to `.agents/skills/shell-geinin/` in the target repository. For a reusable installation, use Codex's `$skill-installer` with this skill directory after the repository is published.
-
-The `.codex-plugin/` manifest makes this checkout a skill-only Codex plugin for use through a Codex plugin marketplace.
-
-## Repository workflow
-
-This checkout follows the practical flow described in [Comamoca's repository creation guide](https://scrapbox.io/comamoca/%E3%83%AA%E3%83%9D%E3%82%B8%E3%83%88%E3%83%AA%E3%81%AE%E4%BD%9C%E6%88%90%E3%83%BB%E5%85%AC%E9%96%8B%E6%96%B9%E6%B3%95): create the local repository, write and verify the contents, then explicitly create and push the remote repository.
-
-For this already-existing directory, the equivalent publication command is:
+For a reproducible, non-interactive install of the `shell-geinin` skill into
+both supported agents, use:
 
 ```sh
-gh repo create shell-geinin --public --source=. --remote=origin --push
+npx skills add redpeacock78/shell-geinin \
+  --skill shell-geinin \
+  --agent claude-code codex \
+  --global \
+  --yes
 ```
 
-Review the target owner, visibility, and pending commits before running it. GitHub topics are remote metadata and must be added after the repository exists.
+Omit `--global` for a project-scoped install. Use `--copy` when symlinks are
+not appropriate for your environment.
+
+Inspect the repository before installing:
+
+```sh
+npx skills add redpeacock78/shell-geinin --list
+```
+
+The CLI discovers `skills/shell-geinin/SKILL.md` automatically. Its default
+installation is symlink-based, so updates remain easy to pull; `--copy` makes
+an independent copy instead.
+
+## What it covers
+
+- shell and platform detection across POSIX shells, macOS/BSD, BusyBox,
+  PowerShell, Windows command prompt, WSL, MSYS2, and Cygwin
+- producer-side filtering, projection, and bounded output
+- safe handling of filenames, quoting, ordering, whitespace, and untrusted
+  input
+- Git and repository inspection with compact, reviewable commands
+- a deliberate escape hatch to `awk`, `sed`, `jq`, `go`, or another maintained
+  tool when a shell pipeline becomes the wrong abstraction
+
+## Use it
+
+After installation, invoke the skill through the host agent:
+
+- Claude Code: `/shell-geinin`
+- Codex CLI: `$shell-geinin`
+
+The source entrypoint is [`skills/shell-geinin/SKILL.md`](skills/shell-geinin/SKILL.md).
+The longer platform and technique notes live under
+[`skills/shell-geinin/references/`](skills/shell-geinin/references/).
+
+## Repository layout
+
+```text
+skills/shell-geinin/SKILL.md       # Agent Skills entrypoint
+skills/shell-geinin/references/    # Detailed, on-demand guidance
+.claude-plugin/plugin.json         # Claude Code plugin metadata
+.codex-plugin/plugin.json          # Codex plugin metadata
+```
+
+Keeping the skill in the standard `skills/<name>/SKILL.md` layout lets the
+same repository work with the Skills CLI while retaining native plugin
+metadata for Claude Code and Codex CLI workflows.
+
+## Develop and verify
+
+```sh
+git clone https://github.com/redpeacock78/shell-geinin.git
+cd shell-geinin
+npx skills add . --list
+git diff --check
+```
+
+Validate plugin metadata when working on the manifests:
+
+```sh
+claude plugin validate . --strict
+jq empty .claude-plugin/plugin.json .codex-plugin/plugin.json
+```
+
+## References
+
+- [Vercel Labs Skills CLI](https://github.com/vercel-labs/skills)
+- [Comamoca's repository workflow](https://scrapbox.io/comamoca/%E3%83%AA%E3%83%9D%E3%82%B8%E3%83%88%E3%83%AA%E3%81%AE%E4%BD%9C%E6%88%90%E3%83%BB%E5%85%AC%E9%96%8B%E6%96%B9%E6%B3%95)
+- [Comamoca/baserepo](https://github.com/Comamoca/baserepo)
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+[MIT](LICENSE)
