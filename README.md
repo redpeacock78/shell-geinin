@@ -63,6 +63,48 @@ copy is preferable to the CLI's default symlink.
 | Windows `cmd.exe` | Simple text pipelines with explicit quoting |
 | WSL, MSYS2, Cygwin, and Git Bash | Unix-style pipelines with path-boundary care |
 
+## 📊 Measured impact
+
+This benchmark measures the amount of command text and standard output that an agent needs to carry into context.
+
+It does not measure hidden model generation, system prompts, tool-wrapper tokens, stderr, or billing tokens.
+
+The intent is to separate savings from shorter syntax from savings caused by producer-side bounds and field projection.
+
+### Method
+
+- `o200k_base` is the primary tokenizer, with `cl100k_base` used as a cross-check.
+- Total tokens are command-string tokens plus stdout tokens.
+- Inputs include this repository's file inventory, a 5,000-line log, a 120-commit fixture repository, and 1,000 JSON records.
+- The baseline collects broad output, while the shell-geinin form limits at the producer or projects only the required fields.
+- The inventory and bounded-search rows returned byte-for-byte identical output.
+
+Representative comparisons:
+
+```sh
+grep -n 'shell' events.log
+rg -n -m 25 'shell' events.log
+
+git log --all --stat --oneline
+git log -20 --oneline --no-decorate
+
+jq -c '.[]' items.json
+jq -c '.[] | {id,status}' items.json
+```
+
+| Scenario | Command tokens | Output tokens | Total tokens | Reduction |
+| --- | ---: | ---: | ---: | ---: |
+| File inventory, same output | 26 → 14 | 87 → 87 | 113 → 101 | 10.6% |
+| Search, first 25 results, same output | 12 → 12 | 517 → 517 | 529 → 529 | 0.0% |
+| Search, all matches → first 25 | 8 → 12 | 107,335 → 517 | 107,343 → 529 | 99.5% |
+| Git history, full stats → latest 20 summaries | 9 → 12 | 1,122 → 184 | 1,131 → 196 | 82.7% |
+| JSON records, all fields → `id,status` | 8 → 12 | 40,923 → 9,000 | 40,931 → 9,012 | 78.0% |
+
+The largest savings come from bounding output and projecting fields, not from shortening command syntax alone.
+
+The same-output search row shows 0.0% token reduction because both commands return the same 25 lines.
+The producer-bounded form can still reduce processing work, but runtime and subprocess savings are outside this table.
+
 ## 📁 Repository layout
 
 ```text
