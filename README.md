@@ -5,6 +5,7 @@
 Cross-platform shell reasoning for Claude Code and Codex CLI.
 
 [![License: MIT](https://img.shields.io/github/license/redpeacock78/shell-geinin?style=flat-square)](LICENSE)
+[![CI](https://github.com/redpeacock78/shell-geinin/actions/workflows/ci.yml/badge.svg)](https://github.com/redpeacock78/shell-geinin/actions/workflows/ci.yml)
 [![Install with Skills CLI](https://img.shields.io/badge/install-npx%20skills-111827?style=flat-square)](https://github.com/vercel-labs/skills)
 
 </div>
@@ -189,6 +190,10 @@ cd shell-geinin
 npx skills add . --list
 git diff --check
 ```
+
+Every push and pull request runs the lightweight package validation in
+`.github/workflows/ci.yml`.
+It checks the JSON manifests, Skill layout and frontmatter, documented reference files, and whitespace errors.
 
 Validate plugin metadata when changing the manifests:
 

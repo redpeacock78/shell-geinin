@@ -5,6 +5,7 @@
 Claude Code と Codex CLI のためのクロスプラットフォーム対応 Agent Skill
 
 [![ライセンス: MIT](https://img.shields.io/github/license/redpeacock78/shell-geinin?style=flat-square)](LICENSE)
+[![CI](https://github.com/redpeacock78/shell-geinin/actions/workflows/ci.yml/badge.svg)](https://github.com/redpeacock78/shell-geinin/actions/workflows/ci.yml)
 [![Skills CLIでインストール](https://img.shields.io/badge/install-npx%20skills-111827?style=flat-square)](https://github.com/vercel-labs/skills)
 
 </div>
@@ -188,6 +189,9 @@ cd shell-geinin
 npx skills add . --list
 git diff --check
 ```
+
+pushとプルリクエストでは、`.github/workflows/ci.yml` の軽量なパッケージ検証が実行されます。
+JSONマニフェスト、Skillの配置とfrontmatter、文書で参照するファイル、空白エラーを確認します。
 
 マニフェストを変更した場合は、次のコマンドでも確認できます。
 

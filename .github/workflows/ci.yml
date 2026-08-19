@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate skill package
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Check whitespace errors
+        run: git diff --check HEAD^
+
+      - name: Validate plugin manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e 'type == "object" and .name == "shell-geinin"' \
+            .claude-plugin/plugin.json >/dev/null
+          jq -e 'type == "object" and .name == "shell-geinin" and .skills == "./skills/"' \
+            .codex-plugin/plugin.json >/dev/null
+
+      - name: Validate skill layout and frontmatter
+        shell: bash
+        run: |
+          set -euo pipefail
+          skill_file="skills/shell-geinin/SKILL.md"
+          test -f "$skill_file"
+          test "$(find skills -type f -name SKILL.md | wc -l | tr -d '[:space:]')" = 1
+          awk '
+            NR == 1 {
+              if ($0 != "---") exit 1
+              next
+            }
+            $0 == "---" { found = 1; exit }
+            END { if (!found) exit 1 }
+          ' "$skill_file"
+          grep -Eq '^name: shell-geinin$' "$skill_file"
+          grep -Eq '^description: ' "$skill_file"
+          grep -Eq '^compatibility: ' "$skill_file"
+
+      - name: Check documented reference files
+        shell: bash
+        run: |
+          set -euo pipefail
+          for reference in PLATFORMS.md REFERENCE.md EVALS.md RESEARCH-NOTES.md; do
+            test -f "skills/shell-geinin/references/$reference"
+          done
+          test -f README.md
+          test -f README.ja.md
+          test -f LICENSE
