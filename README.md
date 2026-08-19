@@ -1,21 +1,35 @@
+<div align="center">
+
 # shell-geinin
 
-An agent skill for doing shell work that survives contact with real repositories.
+Cross-platform shell reasoning for Claude Code and Codex CLI.
 
-`shell-geinin` helps Claude Code and Codex CLI choose commands that fit the
-active shell, keep data in the shell's native pipeline model, reduce output at
-the producer, and stop when a maintained tool is the better abstraction.
+[![License: MIT](https://img.shields.io/github/license/redpeacock78/shell-geinin?style=flat-square)](LICENSE)
+[![Install with Skills CLI](https://img.shields.io/badge/install-npx%20skills-111827?style=flat-square)](https://github.com/vercel-labs/skills)
 
-## Install
+</div>
 
-The quickest path is the Vercel Labs Skills CLI:
+[🍔 English](README.md) | [🍡 日本語](README.ja.md)
+
+> A reusable Agent Skill for choosing clear, safe shell commands that fit the active shell and its native data model.
+
+## 🚀 Quick start
 
 ```sh
 npx skills add redpeacock78/shell-geinin
 ```
 
-For a reproducible, non-interactive install of the `shell-geinin` skill into
-both supported agents, use:
+Then let the host agent use `shell-geinin` for repository investigation,
+file search, Git inspection, structured data reduction, and command design.
+
+Invoke it from the host agent with:
+
+- Claude Code: `/shell-geinin`
+- Codex CLI: `$shell-geinin`
+
+## ⬇️ Install
+
+Install the `shell-geinin` skill for both Claude Code and Codex CLI:
 
 ```sh
 npx skills add redpeacock78/shell-geinin \
@@ -25,55 +39,45 @@ npx skills add redpeacock78/shell-geinin \
   --yes
 ```
 
-Omit `--global` for a project-scoped install. Use `--copy` when symlinks are
-not appropriate for your environment.
+Omit `--global` for a project-scoped install. Use `--copy` when a standalone
+copy is preferable to the CLI's default symlink.
 
-Inspect the repository before installing:
+> [!TIP]
+> Use `npx skills add redpeacock78/shell-geinin --list` to inspect the skills
+> exposed by this repository before installing them.
 
-```sh
-npx skills add redpeacock78/shell-geinin --list
-```
+## 🧠 What it teaches
 
-The CLI discovers `skills/shell-geinin/SKILL.md` automatically. Its default
-installation is symlink-based, so updates remain easy to pull; `--copy` makes
-an independent copy instead.
+- detect the active shell instead of guessing from the operating system
+- preserve text streams in POSIX shells and objects in PowerShell
+- filter, project, group, and bound data at the producer
+- treat filenames, quoting, ordering, whitespace, and untrusted input as correctness concerns
+- move to a maintained tool such as `awk`, `sed`, `jq`, `git`, or `gh` when a shell pipeline is the wrong abstraction
 
-## What it covers
+## 🌐 Supported environments
 
-- shell and platform detection across POSIX shells, macOS/BSD, BusyBox,
-  PowerShell, Windows command prompt, WSL, MSYS2, and Cygwin
-- producer-side filtering, projection, and bounded output
-- safe handling of filenames, quoting, ordering, whitespace, and untrusted
-  input
-- Git and repository inspection with compact, reviewable commands
-- a deliberate escape hatch to `awk`, `sed`, `jq`, `go`, or another maintained
-  tool when a shell pipeline becomes the wrong abstraction
+| Environment | Guidance |
+| --- | --- |
+| POSIX shells, macOS/BSD, Linux, and BusyBox | Portable text-stream pipelines |
+| PowerShell | Object-native pipelines and property selection |
+| Windows `cmd.exe` | Simple text pipelines with explicit quoting |
+| WSL, MSYS2, Cygwin, and Git Bash | Unix-style pipelines with path-boundary care |
 
-## Use it
-
-After installation, invoke the skill through the host agent:
-
-- Claude Code: `/shell-geinin`
-- Codex CLI: `$shell-geinin`
-
-The source entrypoint is [`skills/shell-geinin/SKILL.md`](skills/shell-geinin/SKILL.md).
-The longer platform and technique notes live under
-[`skills/shell-geinin/references/`](skills/shell-geinin/references/).
-
-## Repository layout
+## 📁 Repository layout
 
 ```text
 skills/shell-geinin/SKILL.md       # Agent Skills entrypoint
 skills/shell-geinin/references/    # Detailed, on-demand guidance
 .claude-plugin/plugin.json         # Claude Code plugin metadata
 .codex-plugin/plugin.json          # Codex plugin metadata
+README.ja.md                       # Japanese documentation
 ```
 
-Keeping the skill in the standard `skills/<name>/SKILL.md` layout lets the
-same repository work with the Skills CLI while retaining native plugin
-metadata for Claude Code and Codex CLI workflows.
+The standard `skills/<name>/SKILL.md` layout makes the repository discoverable
+by the Skills CLI while the plugin manifests keep native Claude Code and Codex
+CLI workflows available.
 
-## Develop and verify
+## 🛠️ Development
 
 ```sh
 git clone https://github.com/redpeacock78/shell-geinin.git
@@ -82,19 +86,19 @@ npx skills add . --list
 git diff --check
 ```
 
-Validate plugin metadata when working on the manifests:
+Validate plugin metadata when changing the manifests:
 
 ```sh
 claude plugin validate . --strict
 jq empty .claude-plugin/plugin.json .codex-plugin/plugin.json
 ```
 
-## References
+## 📚 References
 
 - [Vercel Labs Skills CLI](https://github.com/vercel-labs/skills)
 - [Comamoca's repository workflow](https://scrapbox.io/comamoca/%E3%83%AA%E3%83%9D%E3%82%B8%E3%83%88%E3%83%AA%E3%81%AE%E4%BD%9C%E6%88%90%E3%83%BB%E5%85%AC%E9%96%8B%E6%96%B9%E6%B3%95)
 - [Comamoca/baserepo](https://github.com/Comamoca/baserepo)
 
-## License
+## 📜 License
 
 [MIT](LICENSE)
