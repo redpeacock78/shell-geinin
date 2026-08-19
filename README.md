@@ -168,6 +168,45 @@ When both forms return thousands of rows, the shared output dominates and syntax
 When the result is a compact aggregate, command text accounts for a larger share and the shell form saves more.
 If the shell composition becomes harder to read or maintain, a tested script is the documented escalation path.
 
+### Codex CLI: warm-session measurement
+
+The measurements above are a shell and context proxy. Codex can expose a closer per-turn measurement through `codex exec --json`: the CLI emits newline-delimited JSON events, and `codex exec resume` continues the same session. See the [official Codex CLI command reference](https://learn.chatgpt.com/docs/developer-commands?surface=cli).
+
+We used one initial turn to warm each condition, then compared the next two turns in the same session. The result below is an exploratory snapshot, not a claim that every task or model will save tokens.
+
+- Environment: macOS/zsh, Codex CLI `0.148.0`, read-only sandbox, reasoning effort `low`, and the same locally configured model for both arms.
+- Fixture: a deterministic 120,000-line, 11.4 MB log and a 50,000-record, 5.5 MB NDJSON file.
+- Baseline: `shell-geinin` was explicitly disabled; inline Python was allowed.
+- Treatment: `shell-geinin` was explicitly used and retained between turns.
+- `input`, `cached input`, `output`, and `reasoning` come from each `turn.completed.usage` event.
+- `command chars` and `stdout bytes` are local diagnostics from completed command events, not billing metrics.
+- Both arms returned the same verified counts and selected records for the two warm tasks.
+
+Warm turns only (`N=1` session per arm):
+
+| Task | Arm | Input | Cached input | Output | Reasoning | Tool calls | Command chars | Stdout bytes |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| NDJSON filter + projection | baseline | 62,061 | 40,448 | 368 | 108 | 1 | 419 | 237 |
+| NDJSON filter + projection | shell-geinin | 65,913 | 41,472 | 787 | 527 | 1 | 225 | 256 |
+| Full-log grouped count | baseline | 76,316 | 47,616 | 373 | 161 | 1 | 410 | 63 |
+| Full-log grouped count | shell-geinin | 105,934 | 101,632 | 1,042 | 538 | 2 | 859 | 82 |
+| Warm aggregate | baseline | 138,377 | 88,064 | 741 | 269 | 2 | 829 | 300 |
+| Warm aggregate | shell-geinin | 171,847 | 143,104 | 1,829 | 1,065 | 3 | 1,084 | 338 |
+
+For this snapshot, the raw sum `input + output + reasoning` increased from 139,387 to 174,741 (+25.4%) with `shell-geinin`. The simple uncached-side sum `(input - cached input) + output + reasoning` decreased from 51,323 to 31,637 (-38.4%), but that is not a billing total. Cached-input and reasoning accounting depend on the Codex/model configuration, so the two figures must not be collapsed into one “savings” number.
+
+The narrower conclusion is more useful: the Skill steered the warm tasks toward native `jq`/`awk` processing and bounded data output, but agent-generated output and reasoning still dominated this run. At least five sessions per arm, with cold and warm turns reported separately, are needed before making a general efficiency claim. Live Codex measurements belong in a manual or scheduled benchmark rather than ordinary pull-request CI because model behavior, authentication, and usage limits are external variables.
+
+The raw usage can be collected with the CLI and reduced with `jq`:
+
+```sh
+codex exec --json --sandbox read-only 'warm-up task' > cold.jsonl
+codex exec resume --json "$THREAD_ID" 'measurement task' > warm.jsonl
+jq -c 'select(.type == "turn.completed") | .usage' warm.jsonl
+```
+
+This is the Codex-native equivalent of the article's local usage dashboard: JSONL is the measurement source, while SQLite/FastAPI/OTLP would be optional visualization layers.
+
 ## 📁 Repository layout
 
 ```text
@@ -205,6 +244,7 @@ jq empty .claude-plugin/plugin.json .codex-plugin/plugin.json
 ## 📚 References
 
 - [Vercel Labs Skills CLI](https://github.com/vercel-labs/skills)
+- [OpenAI Codex CLI developer commands](https://learn.chatgpt.com/docs/developer-commands?surface=cli)
 - [Comamoca's repository workflow](https://scrapbox.io/comamoca/%E3%83%AA%E3%83%9D%E3%82%B8%E3%83%88%E3%83%AA%E3%81%AE%E4%BD%9C%E6%88%90%E3%83%BB%E5%85%AC%E9%96%8B%E6%96%B9%E6%B3%95)
 - [Comamoca/baserepo](https://github.com/Comamoca/baserepo)
 

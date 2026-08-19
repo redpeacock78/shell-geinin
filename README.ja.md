@@ -167,6 +167,54 @@ awk '$2 ~ /^status=(ERROR|WARN)$/ && $3 ~ /^service=(api|worker)$/ { sub(/^servi
 結果が短い集計ではコマンド文字列の割合が増えるため、shell-geinin型の削減率が大きくなります。
 シェルの組み合わせが読みにくく保守しにくくなる場合は、テスト可能なスクリプトへ昇格する方針を取ります。
 
+### Codex CLIでの暖気済みセッション測定
+
+上の測定は、シェルのコマンド文字列と標準出力を使った代理指標です。
+Codexでは `codex exec --json` を使うとターン単位のJSONイベントを取得でき、`codex exec resume` で同じセッションを継続できます。
+仕様は[OpenAI公式のCodex CLIコマンドリファレンス](https://learn.chatgpt.com/docs/developer-commands?surface=cli)を参照してください。
+
+各条件の初回ターンを暖機に使い、同じセッションの次の2ターンを比較しました。
+以下は探索的なスナップショットであり、すべてのタスクやモデルに対する削減を保証する結果ではありません。
+
+- 環境：macOS/zsh、Codex CLI `0.148.0`、読み取り専用Sandbox、推論強度 `low`、両条件で同じローカル設定モデル
+- 入力データ：固定生成した12万行・11.4 MBのログと、5万件・5.5 MBのNDJSON
+- ベースライン：`shell-geinin` の使用を明示的に禁止し、インラインPythonは許可
+- shell-geinin型：`shell-geinin` を明示的に使用し、同じセッションで継続
+- `input`、`cached input`、`output`、`reasoning` は各 `turn.completed.usage` イベントから取得
+- `command chars` と `stdout bytes` はコマンドイベントから集計した補助指標で、課金トークンではない
+- 2つの暖気タスクは、選択レコードと集計値が一致することを確認
+
+暖気ターンのみ（各条件 `N=1` セッション）：
+
+| タスク | 条件 | Input | Cached input | Output | Reasoning | ツール回数 | コマンド文字数 | 標準出力bytes |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| NDJSONの選択・射影 | ベースライン | 62,061 | 40,448 | 368 | 108 | 1 | 419 | 237 |
+| NDJSONの選択・射影 | shell-geinin型 | 65,913 | 41,472 | 787 | 527 | 1 | 225 | 256 |
+| 全ログのグループ集計 | ベースライン | 76,316 | 47,616 | 373 | 161 | 1 | 410 | 63 |
+| 全ログのグループ集計 | shell-geinin型 | 105,934 | 101,632 | 1,042 | 538 | 2 | 859 | 82 |
+| 暖気ターン合計 | ベースライン | 138,377 | 88,064 | 741 | 269 | 2 | 829 | 300 |
+| 暖気ターン合計 | shell-geinin型 | 171,847 | 143,104 | 1,829 | 1,065 | 3 | 1,084 | 338 |
+
+今回のスナップショットでは、`input + output + reasoning` の単純合計は `shell-geinin` で139,387から174,741へ25.4%増えました。
+一方、単純な未キャッシュ側の合計 `(input - cached input) + output + reasoning` は51,323から31,637へ38.4%減っていますが、これは課金トークン合計ではありません。
+Cached inputとreasoningの扱いはCodexやモデルの設定に依存するため、1つの「削減量」にまとめてはいけません。
+
+今回の妥当な結論は限定的です。
+Skillによって暖気後の処理はネイティブな `jq`/`awk` と出力上限へ寄りましたが、エージェント自身の出力と推論は依然として大きな割合を占めました。
+一般的な効率改善を主張するには、各条件5セッション以上で、冷間ターンと暖気ターンを分けて報告する必要があります。
+Codexのライブ計測は、モデルの揺らぎ、認証、利用上限が外部要因になるため、通常のプルリクエストCIではなく手動またはスケジュール実行に置くのが適切です。
+
+CLIのJSONLを取得し、`jq`でusageだけを取り出せます。
+
+```sh
+codex exec --json --sandbox read-only '暖機タスク' > cold.jsonl
+codex exec resume --json "$THREAD_ID" '測定タスク' > warm.jsonl
+jq -c 'select(.type == "turn.completed") | .usage' warm.jsonl
+```
+
+これは記事のローカル使用量ダッシュボードに対するCodexネイティブな対応です。
+JSONLを測定源とし、SQLite/FastAPI/OTLPは必要になった場合だけ可視化層として追加します。
+
 ## 📁 リポジトリ構成
 
 ```text
@@ -203,6 +251,7 @@ jq empty .claude-plugin/plugin.json .codex-plugin/plugin.json
 ## 📚 参考資料
 
 - [Vercel Labs Skills CLI](https://github.com/vercel-labs/skills)
+- [OpenAI Codex CLI developer commands](https://learn.chatgpt.com/docs/developer-commands?surface=cli)
 - [Comamocaのリポジトリ作成と公開の手順](https://scrapbox.io/comamoca/%E3%83%AA%E3%83%9D%E3%82%B8%E3%83%88%E3%83%AA%E3%81%AE%E4%BD%9C%E6%88%90%E3%83%BB%E5%85%AC%E9%96%8B%E6%96%B9%E6%B3%95)
 - [Comamoca/baserepo](https://github.com/Comamoca/baserepo)
 
