@@ -168,53 +168,111 @@ awk '$2 ~ /^status=(ERROR|WARN)$/ && $3 ~ /^service=(api|worker)$/ { sub(/^servi
 結果が短い集計ではコマンド文字列の割合が増えるため、shell-geinin型の削減率が大きくなります。
 シェルの組み合わせが読みにくく保守しにくくなる場合は、テスト可能なスクリプトへ昇格する方針を取ります。
 
-### Codex CLIでの暖気済みセッション測定
+### Codex CLIでの制御A/B測定
 
 上の測定は、シェルのコマンド文字列と標準出力を使った代理指標です。
-Codexでは `codex exec --json` を使うとターン単位のJSONイベントを取得でき、`codex exec resume` で同じセッションを継続できます。
+Codexでは `codex exec --json` から改行区切りのJSONイベントを取得でき、`codex exec resume` で同じセッションを継続できます。
 仕様は[OpenAI公式のCodex CLIコマンドリファレンス](https://learn.chatgpt.com/docs/developer-commands?surface=cli)を参照してください。
 
-各条件の初回ターンを暖機に使い、同じセッションの次の2ターンを比較しました。
-以下は探索的なスナップショットであり、すべてのタスクやモデルに対する削減を保証する結果ではありません。
+以前の1セッション測定は、以下の結果で置き換えました。
+以前のbaselineにはターンごとのSkill使用禁止を入れていなかったため、Codex自身がインストール済みSkillを読み込める状態でした。
+今回のbaselineでは、コマンドイベントに `SKILL.md` 参照がないことを確認しています。
 
-- 環境：macOS/zsh、Codex CLI `0.148.0`、読み取り専用Sandbox、推論強度 `low`、両条件で同じローカル設定モデル
-- 入力データ：固定生成した12万行・11.4 MBのログと、5万件・5.5 MBのNDJSON
-- ベースライン：`shell-geinin` の使用を明示的に禁止し、インラインPythonは許可
-- shell-geinin型：`shell-geinin` を明示的に使用し、同じセッションで継続
-- `input`、`cached input`、`output`、`reasoning` は各 `turn.completed.usage` イベントから取得
-- `command chars` と `stdout bytes` はコマンドイベントから集計した補助指標で、課金トークンではない
-- 2つの暖気タスクは、選択レコードと集計値が一致することを確認
+#### 測定設計
 
-暖気ターンのみ（各条件 `N=1` セッション）：
+- 各条件を独立した `M=5` セッションで実行し、各セッションで同じ `N=10` タスクを実行
+- baselineは暖気を置かず、1ターン目から本番タスクを実行
+- shell-geinin型はSkillだけを読む暖気を1ターン実行し、その後に同じ10タスクを実行
+- 環境はmacOS/zsh、Codex CLI `0.148.0`、読み取り専用Sandbox、推論強度 `low`、同じローカル設定モデル
+- 入力データは固定生成した12万行、11.4 MBのログと、5万件、5.5 MBのNDJSON
+- 各タスクは読み取り専用で、同じ順序で実行し、短い集計値または選択レコードだけを返す
+- `M` は独立セッション間の揺らぎを測り、`N` はSkill暖気の償却を測る
 
-| タスク | 条件 | Input | Cached input | Output | Reasoning | ツール回数 | コマンド文字数 | 標準出力bytes |
-| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| NDJSONの選択・射影 | ベースライン | 62,061 | 40,448 | 368 | 108 | 1 | 419 | 237 |
-| NDJSONの選択・射影 | shell-geinin型 | 65,913 | 41,472 | 787 | 527 | 1 | 225 | 256 |
-| 全ログのグループ集計 | ベースライン | 76,316 | 47,616 | 373 | 161 | 1 | 410 | 63 |
-| 全ログのグループ集計 | shell-geinin型 | 105,934 | 101,632 | 1,042 | 538 | 2 | 859 | 82 |
-| 暖気ターン合計 | ベースライン | 138,377 | 88,064 | 741 | 269 | 2 | 829 | 300 |
-| 暖気ターン合計 | shell-geinin型 | 171,847 | 143,104 | 1,829 | 1,065 | 3 | 1,084 | 338 |
+baselineには、Agent Skillや `SKILL.md` を読まないこと、shell-geininを使わないこと、インラインPythonは許可することを毎ターン指示しました。
+shell-geinin型では、暖気ターンでSkill全体を読み、そのセッションを継続しました。
+この指示は測定ハーネスの制御であり、通常のタスク入力を推奨するものではありません。
 
-今回のスナップショットでは、`input + output + reasoning` の単純合計は `shell-geinin` で139,387から174,741へ25.4%増えました。
-一方、単純な未キャッシュ側の合計 `(input - cached input) + output + reasoning` は51,323から31,637へ38.4%減っていますが、これは課金トークン合計ではありません。
-Cached inputとreasoningの扱いはCodexやモデルの設定に依存するため、1つの「削減量」にまとめてはいけません。
+**定常比較**ではshell-geinin型の暖気を除外します。
+**償却後比較**ではshell-geinin型だけ `(暖気 + Nタスク) / N` を計算し、baselineには架空の暖気を加えません。
 
-今回の妥当な結論は限定的です。
-Skillによって暖気後の処理はネイティブな `jq`/`awk` と出力上限へ寄りましたが、エージェント自身の出力と推論は依然として大きな割合を占めました。
-一般的な効率改善を主張するには、各条件5セッション以上で、冷間ターンと暖気ターンを分けて報告する必要があります。
-Codexのライブ計測は、モデルの揺らぎ、認証、利用上限が外部要因になるため、通常のプルリクエストCIではなく手動またはスケジュール実行に置くのが適切です。
+- `input` と `cached input` は各 `turn.completed.usage` の値
+- `uncached input` は `input - cached input`
+- `command chars` と `stdout bytes` は完了したコマンドイベントから集計
+- `shell I/O proxy` は `command chars + stdout bytes` で、トークナイザーの値でも課金トークンでもない
+- `output` と `reasoning` は副次指標として記録し、主要な代理指標の比較には加えない
 
-CLIのJSONLを取得し、`jq`でusageだけを取り出せます。
+#### 定常状態の結果
+
+10タスクを実行した50ターンの平均です。
+括弧内は5セッションのセッション平均の中央値です。
+
+| タスクあたりの指標 | baseline | shell-geinin型 | 平均差 |
+| --- | ---: | ---: | ---: |
+| Input tokens | 121,986 (119,854) | 129,494 (125,492) | +6.2% |
+| Uncached input tokens | 10,493 (10,695) | 6,977 (5,121) | -33.5% |
+| Command chars | 549 (544) | 517 (476) | -5.9% |
+| 標準出力bytes | 21,300 (343) | 261 (273) | -98.8% |
+| Shell I/O proxy | 21,849 (930) | 778 (733) | -96.4% |
+| Output tokens、副次指標 | 535 (541) | 615 (544) | +15.0% |
+| Reasoning tokens、副次指標 | 97 (95) | 213 (169) | +121.0% |
+
+baselineの1タスクでは、中間コマンドが1,049,466 bytesの標準出力を返しました。
+最終的な集計値は正しかったものの、出力上限を設けていない処理でした。
+平均値にはこの外れ値を含め、セッション中央値も併記しています。
+
+回答内容を確認したところ、baselineは50タスク中49タスク、shell-geinin型も50タスク中49タスクで期待した集計値を返しました。
+失敗したのはbaselineのセッション3のタスク1（4つのカウントをすべて0と回答）と、shell-geinin型のセッション4のタスク1（fixtureが非標準形式だと誤認してカウントを返さなかった）です。
+この2ターンもトークン集計には含めているため、表の数値は試行した作業量であり、正答率を補正した削減量ではありません。
+
+暖気自体の平均は、Input tokensが119,673、Uncached input tokensが22,137、Shell I/O proxyが20,073 bytesでした。
+暖気を含めて `N=10` で割ったセッション全体の平均は次のとおりです。
+
+| セッション償却後のタスクあたり指標 | baseline `N/N` | shell-geinin型 `(暖気 + N) / N` | 平均差 |
+| --- | ---: | ---: | ---: |
+| Input tokens | 121,986 | 141,461 | +16.0% |
+| Uncached input tokens | 10,493 | 9,191 | -12.4% |
+| Shell I/O proxy | 21,849 | 2,785 | -87.3% |
+
+baselineの外れ値が償却後Shell I/Oの平均を大きく押し上げています。
+セッション中央値ではbaselineが930、shell-geinin型が2,741であり、10タスクを実行しても暖気が常に回収されるわけではありません。
+
+`N` を変えたときの推移は次のとおりです。
+
+| N | 定常Uncached input、baseline | 定常Uncached input、shell-geinin型 | 償却後Shell I/O、baseline | 償却後Shell I/O、shell-geinin型 |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 23,497 | 8,914 | 2,114 | 21,856 |
+| 2 | 16,406 | 6,543 | 1,375 | 11,076 |
+| 5 | 11,966 | 8,017 | 43,397 | 5,247 |
+| 10 | 10,493 | 6,977 | 21,849 | 2,785 |
+
+この結果は、今回のfixture、CLIバージョン、モデル設定、タスク列に対する制御A/Bです。
+定常状態ではshell-geinin型が未キャッシュ入力とコマンド出力を抑えましたが、総Input tokens、モデルのOutput、Reasoning、暖気の回収期間はタスクによって変わります。
+したがって、一般的な削減率としては扱えません。
+
+1セッションずつ再現する場合は、次の形にします。
 
 ```sh
-codex exec --json --sandbox read-only '暖機タスク' > cold.jsonl
-codex exec resume --json "$THREAD_ID" '測定タスク' > warm.jsonl
-jq -c 'select(.type == "turn.completed") | .usage' warm.jsonl
+# baseline：1ターン目から本番タスク。暖気なし。
+codex exec --json --sandbox read-only \
+  'CONTROL ARM. Agent SkillやSKILL.mdを読まず、通常のコマンドで測定タスクを実行する。' \
+  </dev/null \
+  > baseline-task01.jsonl
+
+# shell-geinin型：Skillだけを暖気し、同じタスクでresumeする。
+codex exec --json --sandbox read-only \
+  'shell-geininのSKILL.md全体を暖気として読む。fixtureはまだ調べない。' \
+  </dev/null \
+  > treatment-warmup.jsonl
+THREAD_ID=$(jq -r 'select(.type == "thread.started") | .thread_id' treatment-warmup.jsonl | head -1)
+codex exec resume --json "$THREAD_ID" \
+  'baselineと同じ測定タスクを実行する。' </dev/null > treatment-task01.jsonl
+
+jq -c 'select(.type == "turn.completed") | .usage' treatment-task01.jsonl
+jq -c 'select(.type == "item.completed" and .item.type == "command_execution") | .item' treatment-task01.jsonl
 ```
 
-これは記事のローカル使用量ダッシュボードに対するCodexネイティブな対応です。
-JSONLを測定源とし、SQLite/FastAPI/OTLPは必要になった場合だけ可視化層として追加します。
+これは記事のローカル使用量ダッシュボードに対するCodexネイティブな測定源です。
+JSONLを集計し、SQLite、FastAPI、OTLPは必要になった場合だけ可視化層として追加します。
 
 ## 📁 リポジトリ構成
 

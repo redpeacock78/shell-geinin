@@ -169,44 +169,96 @@ When both forms return thousands of rows, the shared output dominates and syntax
 When the result is a compact aggregate, command text accounts for a larger share and the shell form saves more.
 If the shell composition becomes harder to read or maintain, a tested script is the documented escalation path.
 
-### Codex CLI: warm-session measurement
+### Codex CLI: controlled A/B measurement
 
-The measurements above are a shell and context proxy. Codex can expose a closer per-turn measurement through `codex exec --json`: the CLI emits newline-delimited JSON events, and `codex exec resume` continues the same session. See the [official Codex CLI command reference](https://learn.chatgpt.com/docs/developer-commands?surface=cli).
+The shell measurements above are context proxies. Codex provides a closer per-turn source through `codex exec --json`: it emits newline-delimited JSON events, and `codex exec resume` continues the same session. See the [official Codex CLI command reference](https://learn.chatgpt.com/docs/developer-commands?surface=cli).
 
-We used one initial turn to warm each condition, then compared the next two turns in the same session. The result below is an exploratory snapshot, not a claim that every task or model will save tokens.
+The earlier one-session snapshot is superseded here. Its baseline was not given a per-turn control instruction, so Codex could load the installed Skill by itself. The corrected run below verifies that baseline command events contain no `SKILL.md` reference.
 
-- Environment: macOS/zsh, Codex CLI `0.148.0`, read-only sandbox, reasoning effort `low`, and the same locally configured model for both arms.
-- Fixture: a deterministic 120,000-line, 11.4 MB log and a 50,000-record, 5.5 MB NDJSON file.
-- Baseline: `shell-geinin` was explicitly disabled; inline Python was allowed.
-- Treatment: `shell-geinin` was explicitly used and retained between turns.
-- `input`, `cached input`, `output`, and `reasoning` come from each `turn.completed.usage` event.
-- `command chars` and `stdout bytes` are local diagnostics from completed command events, not billing metrics.
-- Both arms returned the same verified counts and selected records for the two warm tasks.
+#### Design
 
-Warm turns only (`N=1` session per arm):
+- `M=5` independent sessions per arm and `N=10` identical tasks per session.
+- Baseline starts with the first real task and has no warm-up.
+- Treatment has one Skill-only warm-up, followed by the same ten tasks.
+- Both arms use macOS/zsh, Codex CLI `0.148.0`, read-only sandbox, reasoning effort `low`, and the same locally configured model.
+- The fixture is deterministic: a 120,000-line, 11.4 MB log and a 50,000-record, 5.5 MB NDJSON file.
+- Each task is read-only, uses the same task sequence, and reports compact counts or selected records.
+- `M` measures variation between independent sessions. `N` controls how the treatment warm-up is amortized.
 
-| Task | Arm | Input | Cached input | Output | Reasoning | Tool calls | Command chars | Stdout bytes |
-| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| NDJSON filter + projection | baseline | 62,061 | 40,448 | 368 | 108 | 1 | 419 | 237 |
-| NDJSON filter + projection | shell-geinin | 65,913 | 41,472 | 787 | 527 | 1 | 225 | 256 |
-| Full-log grouped count | baseline | 76,316 | 47,616 | 373 | 161 | 1 | 410 | 63 |
-| Full-log grouped count | shell-geinin | 105,934 | 101,632 | 1,042 | 538 | 2 | 859 | 82 |
-| Warm aggregate | baseline | 138,377 | 88,064 | 741 | 269 | 2 | 829 | 300 |
-| Warm aggregate | shell-geinin | 171,847 | 143,104 | 1,829 | 1,065 | 3 | 1,084 | 338 |
+The baseline control instruction forbids reading or invoking any Agent Skill and allows inline Python. The treatment warm-up explicitly reads the complete `shell-geinin` Skill and retains it in the resumed session. This instruction is part of the harness, not a claim about how a normal user should phrase a task.
 
-For this snapshot, the raw sum `input + output + reasoning` increased from 139,387 to 174,741 (+25.4%) with `shell-geinin`. The simple uncached-side sum `(input - cached input) + output + reasoning` decreased from 51,323 to 31,637 (-38.4%), but that is not a billing total. Cached-input and reasoning accounting depend on the Codex/model configuration, so the two figures must not be collapsed into one “savings” number.
+The primary steady-state comparison excludes the treatment warm-up. The amortized comparison divides `(treatment warm-up + N treatment tasks)` by `N`; baseline has no artificial warm-up added.
 
-The narrower conclusion is more useful: the Skill steered the warm tasks toward native `jq`/`awk` processing and bounded data output, but agent-generated output and reasoning still dominated this run. At least five sessions per arm, with cold and warm turns reported separately, are needed before making a general efficiency claim. Live Codex measurements belong in a manual or scheduled benchmark rather than ordinary pull-request CI because model behavior, authentication, and usage limits are external variables.
+- `input` and `cached input` are the local `turn.completed.usage` fields.
+- `uncached input` is `input - cached input`.
+- `command chars` and `stdout bytes` come from completed command events.
+- `shell I/O proxy` is `command chars + stdout bytes`; it is not a tokenizer result or a billing metric.
+- `output` and `reasoning` are reported as secondary diagnostics and are excluded from the primary proxy comparison.
 
-The raw usage can be collected with the CLI and reduced with `jq`:
+#### Results
+
+Steady state, ten measured tasks per session, averaged over 50 turns. Parentheses contain the median of the five session means.
+
+| Metric per task | Baseline | shell-geinin | Mean delta |
+| --- | ---: | ---: | ---: |
+| Input tokens | 121,986 (119,854) | 129,494 (125,492) | +6.2% |
+| Uncached input tokens | 10,493 (10,695) | 6,977 (5,121) | -33.5% |
+| Command chars | 549 (544) | 517 (476) | -5.9% |
+| Stdout bytes | 21,300 (343) | 261 (273) | -98.8% |
+| Shell I/O proxy | 21,849 (930) | 778 (733) | -96.4% |
+| Output tokens, secondary | 535 (541) | 615 (544) | +15.0% |
+| Reasoning tokens, secondary | 97 (95) | 213 (169) | +121.0% |
+
+One baseline task emitted 1,049,466 stdout bytes from an unbounded intermediate command while still returning the expected final aggregate. The means include this event; the session medians show the typical session more clearly.
+
+A response-quality check found 49/50 successful baseline task responses and 49/50 successful treatment task responses.
+The two failures were baseline session 3 task 1, which returned four zero counts, and treatment session 4 task 1, which returned no counts after incorrectly claiming a nonstandard fixture.
+Those turns remain in the token aggregates, so the tables measure attempted work and are not quality-adjusted savings.
+
+The warm-up itself averaged 119,673 input tokens, 22,137 uncached input tokens, and 20,073 shell I/O bytes. Including that warm-up and dividing by `N=10` gives the following session-level average:
+
+| Metric per task after session amortization | Baseline `N/N` | shell-geinin `(warm-up + N)/N` | Mean delta |
+| --- | ---: | ---: | ---: |
+| Input tokens | 121,986 | 141,461 | +16.0% |
+| Uncached input tokens | 10,493 | 9,191 | -12.4% |
+| Shell I/O proxy | 21,849 | 2,785 | -87.3% |
+
+The amortized shell I/O mean is dominated by the baseline outlier. The median amortized shell I/O was 930 for baseline and 2,741 for treatment, so the warm-up did not pay back in every typical ten-task session.
+
+The N curve shows why both estimands are needed:
+
+| N | Steady uncached input, baseline | Steady uncached input, shell-geinin | Amortized shell I/O, baseline | Amortized shell I/O, shell-geinin |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 23,497 | 8,914 | 2,114 | 21,856 |
+| 2 | 16,406 | 6,543 | 1,375 | 11,076 |
+| 5 | 11,966 | 8,017 | 43,397 | 5,247 |
+| 10 | 10,493 | 6,977 | 21,849 | 2,785 |
+
+This is a controlled A/B result for this fixture, CLI version, model configuration, and task sequence. It supports a narrower claim: shell-geinin reduced uncached input and bounded tool output in the measured steady state. It does not support a universal savings percentage, because total input, model output, reasoning, and warm-up payback depend on the workload.
+
+The same measurement can be reproduced with one session per arm:
 
 ```sh
-codex exec --json --sandbox read-only 'warm-up task' > cold.jsonl
-codex exec resume --json "$THREAD_ID" 'measurement task' > warm.jsonl
-jq -c 'select(.type == "turn.completed") | .usage' warm.jsonl
+# Baseline: first turn is already a real task; no warm-up.
+codex exec --json --sandbox read-only \
+  'CONTROL ARM. Do not read or invoke any Agent Skill or SKILL.md. Run the measurement task.' \
+  </dev/null \
+  > baseline-task01.jsonl
+
+# Treatment: warm up only the Skill, then resume with the same task.
+codex exec --json --sandbox read-only \
+  'Read the complete shell-geinin SKILL.md only as a warm-up. Do not inspect fixture data.' \
+  </dev/null \
+  > treatment-warmup.jsonl
+THREAD_ID=$(jq -r 'select(.type == "thread.started") | .thread_id' treatment-warmup.jsonl | head -1)
+codex exec resume --json "$THREAD_ID" \
+  'Run the same measurement task.' </dev/null > treatment-task01.jsonl
+
+jq -c 'select(.type == "turn.completed") | .usage' treatment-task01.jsonl
+jq -c 'select(.type == "item.completed" and .item.type == "command_execution") | .item' treatment-task01.jsonl
 ```
 
-This is the Codex-native equivalent of the article's local usage dashboard: JSONL is the measurement source, while SQLite/FastAPI/OTLP would be optional visualization layers.
+This is the Codex-native equivalent of the article's local usage dashboard. JSONL is the measurement source; SQLite, FastAPI, and OTLP remain optional visualization layers.
 
 ## 📁 Repository layout
 
