@@ -76,6 +76,7 @@ The intent is to separate savings from shorter syntax from savings caused by pro
 - `o200k_base` is the primary tokenizer, with `cl100k_base` used as a cross-check.
 - Total tokens are command-string tokens plus stdout tokens.
 - Inputs include this repository's file inventory, a 5,000-line log, a 120-commit fixture repository, and 1,000 JSON records.
+- The extended run uses controlled fixtures: a 200,000-line log, 100,000 NDJSON records, and a 1,000-commit history.
 - The baseline collects broad output, while the shell-geinin form limits at the producer or projects only the required fields.
 - The inventory and bounded-search rows returned byte-for-byte identical output.
 
@@ -104,6 +105,35 @@ The largest savings come from bounding output and projecting fields, not from sh
 
 The same-output search row shows 0.0% token reduction because both commands return the same 25 lines.
 The producer-bounded form can still reduce processing work, but runtime and subprocess savings are outside this table.
+
+### Larger and more complex cases
+
+These cases deliberately compare a broad default request with a task-shaped request.
+They are not byte-for-byte equivalent outputs; the same-output comparison above is the appropriate reference when output equivalence is required.
+
+The fixtures were 27.1 MB of 200,000 log lines, 16.9 MB of 100,000 NDJSON records, and a 1,000-commit Git history.
+The primary `o200k_base` results were:
+
+```sh
+rg -n 'status=(ERROR|WARN) service=(api|worker)' events-200k.log
+rg -n -m 50 'status=(ERROR|WARN) service=(api|worker)' events-200k.log
+
+jq -c '.' records-100k.ndjson
+jq -c 'limit(50; select(.status == "error" and .service == "api") | {id,status,service})' records-100k.ndjson
+
+git -C history-repo log --format=fuller --stat
+git -C history-repo log -50 --format='%h %s' --no-decorate
+```
+
+| Scenario | Command tokens | Output tokens | Total tokens | Reduction |
+| --- | ---: | ---: | ---: | ---: |
+| 200k-line log, all matching rows → first 50 | 21 → 25 | 1,846,421 → 2,257 | 1,846,442 → 2,282 | 99.9% |
+| 100k NDJSON, all records → matching `error/api` projections, first 50 | 10 → 36 | 4,599,001 → 16,453 | 4,599,011 → 16,489 | 99.6% |
+| 1,000 commits, full detail → latest 50 one-line summaries | 14 → 21 | 93,562 → 667 | 93,576 → 688 | 99.3% |
+
+The `cl100k_base` cross-check rounded to the same reductions: 99.9%, 99.6%, and 99.3%.
+The result is therefore primarily driven by output cardinality and field width, not by a tokenizer-specific quirk.
+These percentages are measurements on controlled fixtures, not a promise of the same saving for every repository or query.
 
 ## 📁 Repository layout
 
